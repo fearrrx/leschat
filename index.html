@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>leschat - Chat Rooms</title>
+    <title>leschat - Chat Rooms (Made by .fearrr on discord)</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;700&display=swap');
 
@@ -178,19 +178,6 @@
             word-wrap: break-word;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
-        
-        .message .attached-image-link {
-             display: block;
-             margin-top: 8px;
-        }
-        
-        .message .attached-image {
-            max-width: 300px;
-            max-height: 300px;
-            border-radius: 12px;
-            cursor: pointer;
-            border: 2px solid var(--theme-bg-lightest);
-        }
 
         .message.is-own .text {
             background-color: var(--theme-accent-green);
@@ -203,45 +190,39 @@
             border-top: 1px solid var(--theme-border-grey);
             background: var(--theme-bg-lightest);
             flex-shrink: 0;
-            align-items: flex-end;
-            gap: 1rem;
         }
-        
-        #message-textarea {
+
+        #message-input {
             flex-grow: 1;
             border: 1px solid var(--theme-border-grey);
-            border-radius: 18px;
+            border-radius: 20px;
             padding: 0.75rem 1rem;
             outline: none;
             font-size: 1rem;
-            font-family: 'Poppins', sans-serif;
-            resize: none;
-            min-height: 48px;
-            max-height: 150px;
-            line-height: 1.5;
             transition: border-color 0.2s ease;
         }
-        #message-textarea:focus {
+        #message-input:focus {
             border-color: var(--theme-accent-green);
         }
-        
-        #attach-image-btn, #send-message-btn {
-            height: 48px;
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        #attach-image-btn {
-            background-color: var(--theme-accent-grey);
-            color: white;
-            padding: 0.75rem;
+
+        button {
+            background-color: var(--theme-accent-green);
+            color: var(--theme-text-dark);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 20px;
             cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background-color 0.3s ease;
         }
-        
-        #image-file-input {
-            display: none;
+
+        button:hover {
+            background-color: #a1ab95;
+        }
+
+        #send-message-btn {
+            margin-left: 1rem;
         }
 
         .popup {
@@ -378,6 +359,7 @@
             </div>
             <h2>My Created Rooms</h2>
             <ul id="created-rooms-list"></ul>
+            
             <h2>Joined Rooms</h2>
             <ul id="joined-rooms-list"></ul>
         </div>
@@ -393,16 +375,14 @@
             </div>
             <div id="chat-messages"></div>
             <div class="chat-input">
-                <label id="attach-image-btn" for="image-file-input">📎</label>
-                <input type="file" id="image-file-input" accept="image/*">
-                <textarea id="message-textarea" placeholder="Type a message..." rows="1"></textarea>
+                <input type="text" id="message-input" placeholder="Type a message...">
                 <button id="send-message-btn">Send</button>
             </div>
         </div>
     </div>
     
     <!-- Username Setup Popup (Uncloseable) -->
-    <div id="username-popup" class="popup visible">
+    <div id="username-popup" class="popup visible"> <!-- Starts visible -->
         <div class="popup-content">
             <h2>Welcome to leschat</h2>
             <form id="username-form">
@@ -485,15 +465,13 @@
     const joinedRoomsList = document.getElementById('joined-rooms-list');
     const dashboardView = document.getElementById('dashboard');
     const chatRoomView = document.getElementById('chat-room');
-    const messageTextarea = document.getElementById('message-textarea');
+    const messageInput = document.getElementById('message-input');
     const sendMessageBtn = document.getElementById('send-message-btn');
-    const imageFileInput = document.getElementById('image-file-input');
 
     // --- State Variables ---
     let user = null;
     let currentRoom = null;
     let messageSubscription = null;
-    let discordWebhookUrl = null;
 
     // --- Functions ---
     
@@ -513,6 +491,7 @@
     const loadDashboard = async () => {
         if (!user) return;
         
+        // Fetch created rooms
         const { data: created, error: createdError } = await supabase.from('rooms').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
         if (createdError) console.error("Error fetching created rooms:", createdError);
 
@@ -526,6 +505,7 @@
             });
         }
         
+        // Fetch joined rooms
         const { data: memberships, error: memberError } = await supabase.from('room_members').select('rooms(*)').eq('user_id', user.id);
         if (memberError) console.error("Error fetching memberships:", memberError);
 
@@ -577,18 +557,9 @@
         if (user && message.user_id === user.id) {
             messageElement.classList.add('is-own');
         }
-
-        const textContent = message.content ? `<div class="text">${message.content}</div>` : '';
-        const imageContent = message.image_url ? `
-            <a href="${message.image_url}" target="_blank" class="attached-image-link" download>
-                <img src="${message.image_url}" class="attached-image" alt="User attached image">
-            </a>
-        ` : '';
-
         messageElement.innerHTML = `
             <div class="sender">${message.username || 'Guest'}</div>
-            ${textContent}
-            ${imageContent}
+            <div class="text">${message.content}</div>
         `;
         chatMessages.appendChild(messageElement);
         chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -604,7 +575,7 @@
                     displayMessage(payload.new);
                     if (document.hidden) {
                         new Notification(`New message in ${currentRoom.name}`, {
-                            body: `${payload.new.username}: ${payload.new.content || 'Sent an image'}`,
+                            body: `${payload.new.username}: ${payload.new.content}`,
                         });
                     }
                 }
@@ -613,68 +584,23 @@
     };
 
     const sendMessage = async () => {
-        const content = messageTextarea.value.trim();
-        const imageFile = imageFileInput.files[0];
-
-        if (!content && !imageFile) return; // Don't send empty messages
-
-        sendMessageBtn.disabled = true; // Prevent double sending
-
-        let imageUrl = null;
-
-        // Step 1: Handle image upload to Discord
-        if (imageFile) {
-            if (!discordWebhookUrl) {
-                alert("Discord webhook URL is not set. Cannot upload image.");
-                sendMessageBtn.disabled = false;
-                return;
-            }
-            const formData = new FormData();
-            formData.append('file', imageFile);
-            formData.append('payload_json', JSON.stringify({ content: `Image from ${user.user_metadata.username}` }));
-
-            try {
-                const response = await fetch(discordWebhookUrl, { method: 'POST', body: formData });
-                if (!response.ok) throw new Error('Failed to upload image to Discord.');
-                const data = await response.json();
-                imageUrl = data.attachments[0].url;
-            } catch (error) {
-                console.error('Discord upload error:', error);
-                alert('Could not upload image.');
-                sendMessageBtn.disabled = false;
-                return;
-            }
+        const content = messageInput.value.trim();
+        if (content && currentRoom && user) {
+            const messageData = { 
+                room_id: currentRoom.id, 
+                content: content,
+                user_id: user.id,
+                username: user.user_metadata.username
+            };
+            displayMessage(messageData);
+            messageInput.value = '';
+            const { error } = await supabase.from('messages').insert([messageData]);
+            if (error) console.error('Error sending message:', error);
         }
-
-        // Step 2: Prepare and insert message into Supabase
-        const messageData = { 
-            room_id: currentRoom.id, 
-            content: content || null, // Send null if only an image is attached
-            user_id: user.id,
-            username: user.user_metadata.username,
-            image_url: imageUrl
-        };
-        
-        displayMessage(messageData); // Optimistic UI update
-        messageTextarea.value = '';
-        imageFileInput.value = ''; // Clear the file input
-
-        const { error } = await supabase.from('messages').insert([messageData]);
-        if (error) {
-            console.error('Error sending message to Supabase:', error);
-        }
-        
-        sendMessageBtn.disabled = false;
     };
     
     async function initApp() {
-        // Prompt for Discord webhook URL
-        discordWebhookUrl = localStorage.getItem('discordWebhookUrl');
-        if (!discordWebhookUrl) {
-             discordWebhookUrl = prompt("https://discord.com/api/webhooks/1416376942541799534/n8OoqktaklFSKXZ0BZIPDGI2wP6KjNJgXpxHGUBebgk_nZBTmo7CPUwJr0zaNc_maRvT");
-             if (discordWebhookUrl) localStorage.setItem('discordWebhookUrl', discordWebhookUrl);
-        }
-        
+        // The username popup is visible by default in the HTML, so no JS is needed to show it.
         const { data, error } = await supabase.auth.getSession();
         
         if (data.session) {
@@ -735,6 +661,7 @@
             console.error('Error creating room:', error);
             alert('Error creating room.');
         } else {
+            // Add creator as a member of their own room
             await supabase.from('room_members').upsert({ room_id: newRoom.id, user_id: user.id });
 
             document.getElementById('display-invite-code').textContent = invCode;
@@ -781,17 +708,8 @@
     joinedRoomsList.addEventListener('click', roomListClickHandler);
 
     sendMessageBtn.addEventListener('click', sendMessage);
-    messageTextarea.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-    
-    // Auto-resize textarea
-    messageTextarea.addEventListener('input', () => {
-        messageTextarea.style.height = 'auto';
-        messageTextarea.style.height = `${messageTextarea.scrollHeight}px`;
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); sendMessage(); }
     });
 
     initApp();
