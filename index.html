@@ -307,6 +307,42 @@
         .hidden {
             display: none !important;
         }
+        
+        /* Styles for the new invite details popup */
+        .invite-details {
+            margin-top: 1.5rem;
+            background-color: var(--theme-bg-lighter);
+            border: 1px solid var(--theme-border-grey);
+            padding: 1rem;
+            border-radius: 8px;
+        }
+
+        .detail-item {
+            margin-bottom: 1rem;
+        }
+        .detail-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-item label {
+            display: block;
+            font-weight: 500;
+            color: var(--theme-text-light);
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
+        }
+
+        .detail-item code {
+            font-family: monospace;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--theme-text-dark);
+            background-color: var(--theme-bg-off-white);
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            display: block;
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body>
@@ -384,6 +420,25 @@
         </div>
     </div>
 
+    <!-- NEW: Invite Code Display Popup -->
+    <div id="invite-code-popup" class="popup">
+        <div class="popup-content">
+            <span class="close-btn" data-popup="invite-code-popup">&times;</span>
+            <h2>Room Created!</h2>
+            <p style="color: var(--theme-text-medium);">Share these details to let friends join:</p>
+            <div class="invite-details">
+                <div class="detail-item">
+                    <label>Invite Code:</label>
+                    <code id="display-invite-code"></code>
+                </div>
+                <div class="detail-item" id="password-display-container" style="display: none;">
+                    <label>Password:</label>
+                    <code id="display-room-password"></code>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script type="module">
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
@@ -399,6 +454,7 @@
     const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
     const createRoomPopup = document.getElementById('create-room-popup');
     const joinRoomPopup = document.getElementById('join-room-popup');
+    const inviteCodePopup = document.getElementById('invite-code-popup'); // New popup
     const closeBtns = document.querySelectorAll('.close-btn');
     const createRoomForm = document.getElementById('create-room-form');
     const joinRoomForm = document.getElementById('join-room-form');
@@ -415,7 +471,6 @@
 
     // --- Functions ---
     
-    // **FIXED:** Generate random 6-character alphanumeric code
     function generateInviteCode() {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         let result = '';
@@ -494,11 +549,9 @@
         if (messageSubscription) {
             messageSubscription.unsubscribe();
         }
-        // **FIXED:** Simplified channel name for robustness
         messageSubscription = supabase.channel(`room-${roomId}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}`}, 
             (payload) => {
-                // Don't display our own message twice (it was already displayed optimistically)
                 if (payload.new.user_id !== user.id) {
                     displayMessage(payload.new);
                 }
@@ -516,15 +569,12 @@
                 username: user.user_metadata.username
             };
             
-            // **FIXED:** Optimistic UI update for real-time feel
-            // Display the message immediately, don't wait for the database response.
             displayMessage(messageData);
             messageInput.value = '';
 
             const { error } = await supabase.from('messages').insert([messageData]);
             if (error) {
                 console.error('Error sending message:', error);
-                // Optional: Show an error icon next to the failed message
             }
         }
     };
@@ -593,8 +643,6 @@
         e.preventDefault();
         const roomName = document.getElementById('roomName').value;
         const password = document.getElementById('roomPassword').value;
-        
-        // **FIXED:** Generate code before the insert call to ensure it's available for the alert
         const invCode = generateInviteCode();
 
         const { error } = await supabase
@@ -610,7 +658,18 @@
             console.error('Error creating room:', error);
             alert('Error creating room.');
         } else {
-            alert(`Room created! Your invite code is: ${invCode}`);
+            // **FIXED:** Show the new dedicated popup instead of an alert
+            document.getElementById('display-invite-code').textContent = invCode;
+            const passwordDisplayContainer = document.getElementById('password-display-container');
+            if (password) {
+                document.getElementById('display-room-password').textContent = password;
+                passwordDisplayContainer.style.display = 'block';
+            } else {
+                passwordDisplayContainer.style.display = 'none';
+            }
+            togglePopup(inviteCodePopup, true);
+
+            // Hide the old popup and refresh the dashboard
             togglePopup(createRoomPopup, false);
             createRoomForm.reset();
             loadDashboard();
@@ -619,7 +678,7 @@
 
     joinRoomForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const invCode = document.getElementById('invCode').value.trim().toUpperCase(); // Convert to uppercase to match generated code
+        const invCode = document.getElementById('invCode').value.trim().toUpperCase();
         const password = document.getElementById('joinPassword').value;
 
         const { data: room, error } = await supabase
