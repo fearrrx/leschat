@@ -78,12 +78,14 @@
             gap: 1rem;
         }
 
-        #created-rooms-list {
+        #created-rooms-list,
+        #joined-rooms-list {
             list-style: none;
             padding: 0;
         }
 
-        #created-rooms-list li {
+        #created-rooms-list li,
+        #joined-rooms-list li {
             background-color: var(--theme-bg-lighter);
             margin-bottom: 0.75rem;
             padding: 1rem 1.5rem;
@@ -94,7 +96,8 @@
             cursor: pointer;
             transition: background-color 0.2s ease, box-shadow 0.2s ease;
         }
-        #created-rooms-list li:hover {
+        #created-rooms-list li:hover,
+        #joined-rooms-list li:hover {
             background-color: var(--theme-bg-off-white);
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
@@ -308,7 +311,6 @@
             display: none !important;
         }
         
-        /* Styles for the new invite details popup */
         .invite-details {
             margin-top: 1.5rem;
             background-color: var(--theme-bg-lighter);
@@ -355,10 +357,12 @@
                 <button id="create-room-btn">Create a Room</button>
                 <button id="join-room-btn">Join a Room</button>
             </div>
-            <h2>My Rooms</h2>
-            <ul id="created-rooms-list">
-                <!-- User's created rooms will be dynamically inserted here -->
-            </ul>
+            <h2>My Created Rooms</h2>
+            <ul id="created-rooms-list"></ul>
+            
+            <!-- NEW: Joined Rooms Section -->
+            <h2>Joined Rooms</h2>
+            <ul id="joined-rooms-list"></ul>
         </div>
 
         <!-- Chat Room View -->
@@ -379,7 +383,7 @@
     </div>
     
     <!-- Username Setup Popup (Uncloseable) -->
-    <div id="username-popup" class="popup">
+    <div id="username-popup" class="popup visible"> <!-- Starts visible -->
         <div class="popup-content">
             <h2>Welcome to leschat</h2>
             <form id="username-form">
@@ -420,7 +424,7 @@
         </div>
     </div>
 
-    <!-- NEW: Invite Code Display Popup -->
+    <!-- Invite Code Display Popup -->
     <div id="invite-code-popup" class="popup">
         <div class="popup-content">
             <span class="close-btn" data-popup="invite-code-popup">&times;</span>
@@ -454,11 +458,12 @@
     const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
     const createRoomPopup = document.getElementById('create-room-popup');
     const joinRoomPopup = document.getElementById('join-room-popup');
-    const inviteCodePopup = document.getElementById('invite-code-popup'); // New popup
+    const inviteCodePopup = document.getElementById('invite-code-popup');
     const closeBtns = document.querySelectorAll('.close-btn');
     const createRoomForm = document.getElementById('create-room-form');
     const joinRoomForm = document.getElementById('join-room-form');
     const createdRoomsList = document.getElementById('created-rooms-list');
+    const joinedRoomsList = document.getElementById('joined-rooms-list');
     const dashboardView = document.getElementById('dashboard');
     const chatRoomView = document.getElementById('chat-room');
     const messageInput = document.getElementById('message-input');
@@ -485,27 +490,54 @@
     };
 
     const loadDashboard = async () => {
-        const { data: allRooms, error } = await supabase.from('rooms').select('*').order('created_at', { ascending: false });
+        if (!user) return;
         
-        if (error) {
-            console.error("Error fetching rooms:", error);
-            return;
-        }
+        // Fetch created rooms
+        const { data: created, error: createdError } = await supabase.from('rooms').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+        if (createdError) console.error("Error fetching created rooms:", createdError);
 
         createdRoomsList.innerHTML = '';
-        if (allRooms && user) {
-            const myRooms = allRooms.filter(room => room.user_id === user.id);
-            myRooms.forEach(room => {
+        if (created) {
+            created.forEach(room => {
                 const li = document.createElement('li');
                 li.dataset.roomId = room.id;
                 li.innerHTML = `<span class="room-item-name">${room.name}</span>`;
                 createdRoomsList.appendChild(li);
             });
         }
+        
+        // Fetch joined rooms
+        const { data: memberships, error: memberError } = await supabase.from('room_members').select('room_id').eq('user_id', user.id);
+        if (memberError) console.error("Error fetching memberships:", memberError);
+
+        joinedRoomsList.innerHTML = '';
+        if (memberships && memberships.length > 0) {
+            const joinedRoomIds = memberships.map(m => m.room_id);
+            const { data: joined, error: joinedError } = await supabase.from('rooms').select('*').in('id', joinedRoomIds);
+            if (joinedError) console.error("Error fetching joined rooms:", joinedError);
+
+            if (joined) {
+                 joined.forEach(room => {
+                    const li = document.createElement('li');
+                    li.dataset.roomId = room.id;
+                    li.innerHTML = `<span class="room-item-name">${room.name}</span>`;
+                    joinedRoomsList.appendChild(li);
+                });
+            }
+        }
+    };
+    
+    const requestNotificationPermission = async () => {
+        if (!("Notification" in window)) return;
+        if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+            await Notification.requestPermission();
+        }
     };
 
     const enterChatRoom = async (room) => {
         currentRoom = room;
+        requestNotificationPermission();
+        
         dashboardView.classList.add('hidden');
         chatRoomView.classList.remove('hidden');
         chatRoomView.style.display = 'flex';
@@ -519,12 +551,7 @@
     const loadMessages = async (roomId) => {
         const chatMessages = document.getElementById('chat-messages');
         chatMessages.innerHTML = '';
-        const { data: messages, error } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('room_id', roomId)
-            .order('created_at', { ascending: true });
-
+        const { data: messages, error } = await supabase.from('messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true });
         if (error) console.error('Error loading messages:', error);
         else messages.forEach(displayMessage);
     };
@@ -536,7 +563,6 @@
         if (user && message.user_id === user.id) {
             messageElement.classList.add('is-own');
         }
-
         messageElement.innerHTML = `
             <div class="sender">${message.username || 'Guest'}</div>
             <div class="text">${message.content}</div>
@@ -546,14 +572,19 @@
     };
 
     const setupMessageSubscription = (roomId) => {
-        if (messageSubscription) {
-            messageSubscription.unsubscribe();
-        }
+        if (messageSubscription) messageSubscription.unsubscribe();
+        
         messageSubscription = supabase.channel(`room-${roomId}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}`}, 
             (payload) => {
                 if (payload.new.user_id !== user.id) {
                     displayMessage(payload.new);
+                    if (document.hidden) {
+                        new Notification(`New message in ${currentRoom.name}`, {
+                            body: `${payload.new.username}: ${payload.new.content}`,
+                            icon: './favicon.ico' // Optional: add an icon
+                        });
+                    }
                 }
             })
             .subscribe();
@@ -568,14 +599,10 @@
                 user_id: user.id,
                 username: user.user_metadata.username
             };
-            
             displayMessage(messageData);
             messageInput.value = '';
-
             const { error } = await supabase.from('messages').insert([messageData]);
-            if (error) {
-                console.error('Error sending message:', error);
-            }
+            if (error) console.error('Error sending message:', error);
         }
     };
     
@@ -595,19 +622,16 @@
             document.getElementById('username-display').textContent = `(as ${user.user_metadata.username})`;
             loadDashboard();
         } else {
-            togglePopup(usernamePopup, true);
+            // No need to show it again, it's already visible by default
         }
     }
     
     usernameForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const usernameInput = document.getElementById('username').value.trim();
-        if (!usernameInput) return;
+        if (!usernameInput || !user) return;
         
-        const { data, error } = await supabase.auth.updateUser({
-            data: { username: usernameInput }
-        });
-
+        const { data, error } = await supabase.auth.updateUser({ data: { username: usernameInput } });
         if (error) {
             console.error("Error setting username:", error);
             alert("Could not set username. Please try again.");
@@ -623,10 +647,7 @@
     joinRoomBtn.addEventListener('click', () => togglePopup(joinRoomPopup, true));
 
     backToDashboardBtn.addEventListener('click', () => {
-        if (messageSubscription) {
-            messageSubscription.unsubscribe();
-            messageSubscription = null;
-        }
+        if (messageSubscription) messageSubscription.unsubscribe();
         currentRoom = null;
         chatRoomView.classList.add('hidden');
         dashboardView.classList.remove('hidden');
@@ -634,9 +655,7 @@
     });
 
     closeBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            togglePopup(btn.closest('.popup'), false);
-        });
+        btn.addEventListener('click', () => togglePopup(btn.closest('.popup'), false));
     });
 
     createRoomForm.addEventListener('submit', async (e) => {
@@ -645,20 +664,14 @@
         const password = document.getElementById('roomPassword').value;
         const invCode = generateInviteCode();
 
-        const { error } = await supabase
-            .from('rooms')
-            .insert([{ 
-                name: roomName, 
-                password: password || null, 
-                invite_code: invCode,
-                user_id: user.id
-            }]);
-
+        const { data: newRoom, error } = await supabase.from('rooms').insert([{ name: roomName, password: password || null, invite_code: invCode, user_id: user.id }]).select().single();
         if (error) {
             console.error('Error creating room:', error);
             alert('Error creating room.');
         } else {
-            // **FIXED:** Show the new dedicated popup instead of an alert
+            // Add creator as a member of their own room
+            await supabase.from('room_members').upsert({ room_id: newRoom.id, user_id: user.id });
+
             document.getElementById('display-invite-code').textContent = invCode;
             const passwordDisplayContainer = document.getElementById('password-display-container');
             if (password) {
@@ -668,8 +681,6 @@
                 passwordDisplayContainer.style.display = 'none';
             }
             togglePopup(inviteCodePopup, true);
-
-            // Hide the old popup and refresh the dashboard
             togglePopup(createRoomPopup, false);
             createRoomForm.reset();
             loadDashboard();
@@ -681,35 +692,32 @@
         const invCode = document.getElementById('invCode').value.trim().toUpperCase();
         const password = document.getElementById('joinPassword').value;
 
-        const { data: room, error } = await supabase
-            .from('rooms')
-            .select('*')
-            .eq('invite_code', invCode)
-            .single();
-
+        const { data: room, error } = await supabase.from('rooms').select('*').eq('invite_code', invCode).single();
         if (error || !room) return alert('Invalid invite code.');
         if (room.password && room.password !== password) return alert('Incorrect password.');
+        
+        const { error: joinError } = await supabase.from('room_members').upsert({ room_id: room.id, user_id: user.id });
+        if (joinError) console.error("Error joining room:", joinError);
 
         togglePopup(joinRoomPopup, false);
         joinRoomForm.reset();
         enterChatRoom(room);
     });
     
-    createdRoomsList.addEventListener('click', async (e) => {
+    const roomListClickHandler = async (e) => {
         const li = e.target.closest('li');
         if (li) {
             const roomId = li.dataset.roomId;
             const { data: room, error } = await supabase.from('rooms').select('*').eq('id', roomId).single();
             if (room) enterChatRoom(room);
         }
-    });
+    };
+    createdRoomsList.addEventListener('click', roomListClickHandler);
+    joinedRoomsList.addEventListener('click', roomListClickHandler);
 
     sendMessageBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            sendMessage();
-        }
+        if (e.key === 'Enter') { e.preventDefault(); sendMessage(); }
     });
 
     initApp();
