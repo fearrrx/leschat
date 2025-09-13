@@ -139,6 +139,7 @@
             background-color: rgba(255, 255, 255, 0.1);
             padding: 0.25rem 0.75rem;
             border-radius: 12px;
+            font-family: monospace;
         }
 
         #chat-messages {
@@ -413,11 +414,15 @@
     let messageSubscription = null;
 
     // --- Functions ---
-
-    const wordList = ["apple", "beach", "cloud", "dance", "eagle", "forest", "grape", "honey", "igloo", "jazz", "kite", "lemon", "mango", "night", "ocean", "piano", "queen", "river", "sunny", "tiger", "umbra", "violet", "water", "xenon", "yacht", "zebra"];
-
+    
+    // **FIXED:** Generate random 6-character alphanumeric code
     function generateInviteCode() {
-        return Array.from({ length: 6 }, () => wordList[Math.floor(Math.random() * wordList.length)]).join('-');
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let result = '';
+        for (let i = 0; i < 6; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
     }
 
     const togglePopup = (popup, show) => {
@@ -433,13 +438,11 @@
         }
 
         createdRoomsList.innerHTML = '';
-        if (allRooms) {
-            // Filter to only show rooms created by the current user
+        if (allRooms && user) {
             const myRooms = allRooms.filter(room => room.user_id === user.id);
             myRooms.forEach(room => {
                 const li = document.createElement('li');
                 li.dataset.roomId = room.id;
-                // Simplified list item without delete/rename buttons
                 li.innerHTML = `<span class="room-item-name">${room.name}</span>`;
                 createdRoomsList.appendChild(li);
             });
@@ -452,7 +455,6 @@
         chatRoomView.classList.remove('hidden');
         chatRoomView.style.display = 'flex';
         document.getElementById('room-name-header').textContent = room.name;
-        // Display the invite code in the chat header
         document.getElementById('invite-code-display').textContent = `Code: ${room.invite_code}`;
         
         await loadMessages(room.id);
@@ -476,7 +478,7 @@
         const chatMessages = document.getElementById('chat-messages');
         const messageElement = document.createElement('div');
         messageElement.classList.add('message');
-        if (message.user_id === user.id) {
+        if (user && message.user_id === user.id) {
             messageElement.classList.add('is-own');
         }
 
@@ -492,33 +494,40 @@
         if (messageSubscription) {
             messageSubscription.unsubscribe();
         }
-
-        messageSubscription = supabase.channel(`public:messages:room_id=eq.${roomId}`)
+        // **FIXED:** Simplified channel name for robustness
+        messageSubscription = supabase.channel(`room-${roomId}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}`}, 
             (payload) => {
-                displayMessage(payload.new);
+                // Don't display our own message twice (it was already displayed optimistically)
+                if (payload.new.user_id !== user.id) {
+                    displayMessage(payload.new);
+                }
             })
             .subscribe();
     };
 
     const sendMessage = async () => {
         const content = messageInput.value.trim();
-        if (content && currentRoom) {
-            const { error } = await supabase
-                .from('messages')
-                .insert([{ 
-                    room_id: currentRoom.id, 
-                    content: content,
-                    user_id: user.id,
-                    username: user.user_metadata.username
-                }]);
+        if (content && currentRoom && user) {
+            const messageData = { 
+                room_id: currentRoom.id, 
+                content: content,
+                user_id: user.id,
+                username: user.user_metadata.username
+            };
+            
+            // **FIXED:** Optimistic UI update for real-time feel
+            // Display the message immediately, don't wait for the database response.
+            displayMessage(messageData);
+            messageInput.value = '';
 
-            if (error) console.error('Error sending message:', error);
-            else messageInput.value = '';
+            const { error } = await supabase.from('messages').insert([messageData]);
+            if (error) {
+                console.error('Error sending message:', error);
+                // Optional: Show an error icon next to the failed message
+            }
         }
     };
-    
-    // --- App Initialization ---
     
     async function initApp() {
         const { data, error } = await supabase.auth.getSession();
@@ -539,8 +548,6 @@
             togglePopup(usernamePopup, true);
         }
     }
-
-    // --- Event Listeners ---
     
     usernameForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -586,25 +593,24 @@
         e.preventDefault();
         const roomName = document.getElementById('roomName').value;
         const password = document.getElementById('roomPassword').value;
+        
+        // **FIXED:** Generate code before the insert call to ensure it's available for the alert
+        const invCode = generateInviteCode();
 
-        // Use .select() to get the created room's data back
-        const { data: newRoom, error } = await supabase
+        const { error } = await supabase
             .from('rooms')
             .insert([{ 
                 name: roomName, 
                 password: password || null, 
-                invite_code: generateInviteCode(), // Generate code on insert
+                invite_code: invCode,
                 user_id: user.id
-            }])
-            .select()
-            .single(); // Use .single() as we expect one row back
+            }]);
 
         if (error) {
             console.error('Error creating room:', error);
             alert('Error creating room.');
         } else {
-            // **FIXED:** Use the invite_code from the returned data
-            alert(`Room created! Your invite code is: ${newRoom.invite_code}`);
+            alert(`Room created! Your invite code is: ${invCode}`);
             togglePopup(createRoomPopup, false);
             createRoomForm.reset();
             loadDashboard();
@@ -613,7 +619,7 @@
 
     joinRoomForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const invCode = document.getElementById('invCode').value.trim().toLowerCase();
+        const invCode = document.getElementById('invCode').value.trim().toUpperCase(); // Convert to uppercase to match generated code
         const password = document.getElementById('joinPassword').value;
 
         const { data: room, error } = await supabase
@@ -630,7 +636,6 @@
         enterChatRoom(room);
     });
     
-    // Simplified click listener for the room list
     createdRoomsList.addEventListener('click', async (e) => {
         const li = e.target.closest('li');
         if (li) {
@@ -648,7 +653,6 @@
         }
     });
 
-    // --- Start the App ---
     initApp();
 
 </script>
