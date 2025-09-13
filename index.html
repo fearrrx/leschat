@@ -151,6 +151,10 @@
             display: flex;
             flex-direction: column;
         }
+        
+        .message.is-own {
+            align-items: flex-end;
+        }
 
         .message .sender {
             font-weight: 500;
@@ -167,6 +171,11 @@
             max-width: 80%;
             word-wrap: break-word;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .message.is-own .text {
+            background-color: var(--theme-accent-green);
+            color: var(--theme-text-dark);
         }
 
         .chat-input {
@@ -224,6 +233,10 @@
             opacity: 0;
             visibility: hidden;
             transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        
+        .popup#username-popup {
+            background-color: rgba(0,0,0,0.85);
         }
 
         .popup.visible {
@@ -298,14 +311,14 @@
     <div class="container">
         <!-- Dashboard View -->
         <div id="dashboard" class="main-content">
-            <h1>leschat Dashboard(beta)</h1>
+            <h1>leschat Dashboard <span id="username-display" style="font-size: 0.9rem; color: var(--theme-text-light);"></span></h1>
             <div class="room-actions">
                 <button id="create-room-btn">Create a Room</button>
                 <button id="join-room-btn">Join a Room</button>
             </div>
             <h2>My Rooms</h2>
             <ul id="created-rooms-list">
-                <!-- Rooms will be dynamically inserted here -->
+                <!-- User's created rooms will be dynamically inserted here -->
             </ul>
         </div>
 
@@ -320,6 +333,18 @@
                 <input type="text" id="message-input" placeholder="Type a message...">
                 <button id="send-message-btn">Send</button>
             </div>
+        </div>
+    </div>
+    
+    <!-- Username Setup Popup (Uncloseable) -->
+    <div id="username-popup" class="popup">
+        <div class="popup-content">
+            <h2>Welcome to leschat</h2>
+            <form id="username-form">
+                <label for="username">Choose a display name to get started:</label>
+                <input type="text" id="username" required>
+                <button type="submit">Start Chatting</button>
+            </form>
         </div>
     </div>
 
@@ -344,7 +369,7 @@
             <span class="close-btn" data-popup="join-room-popup">&times;</span>
             <h2>Join an Existing Room</h2>
             <form id="join-room-form">
-                <label for="invCode">Invite Code (e.g., apple-beach-cloud-...):</label>
+                <label for="invCode">Invite Code:</label>
                 <input type="text" id="invCode" required>
                 <label for="joinPassword">Password (if any):</label>
                 <input type="password" id="joinPassword">
@@ -369,29 +394,23 @@
 <script type="module">
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
-    // --- Your Supabase Credentials ---
     const supabaseUrl = 'https://ntgikndluzigpliqugdz.supabase.co';
     const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50Z2lrbmRsdXppZ3BsaXF1Z2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc3NDQwNDksImV4cCI6MjA3MzMyMDA0OX0.37DaNSVXfFPdH_njKpAfFi-NQkgdw6SU2Az7ZYMUhQk';
-    // ------------------------------------
-    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // --- DOM Elements ---
+    const usernamePopup = document.getElementById('username-popup');
+    const usernameForm = document.getElementById('username-form');
     const createRoomBtn = document.getElementById('create-room-btn');
     const joinRoomBtn = document.getElementById('join-room-btn');
     const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
-    
     const createRoomPopup = document.getElementById('create-room-popup');
     const joinRoomPopup = document.getElementById('join-room-popup');
     const renameRoomPopup = document.getElementById('rename-room-popup');
-    
-    const popups = document.querySelectorAll('.popup');
     const closeBtns = document.querySelectorAll('.close-btn');
-    
     const createRoomForm = document.getElementById('create-room-form');
     const joinRoomForm = document.getElementById('join-room-form');
     const renameRoomForm = document.getElementById('rename-room-form');
-    
     const createdRoomsList = document.getElementById('created-rooms-list');
     const dashboardView = document.getElementById('dashboard');
     const chatRoomView = document.getElementById('chat-room');
@@ -399,6 +418,7 @@
     const sendMessageBtn = document.getElementById('send-message-btn');
 
     // --- State Variables ---
+    let user = null;
     let currentRoom = null;
     let messageSubscription = null;
     let roomToRename = null;
@@ -412,11 +432,7 @@
     }
 
     const togglePopup = (popup, show) => {
-        if (show) {
-            popup.classList.add('visible');
-        } else {
-            popup.classList.remove('visible');
-        }
+        popup.classList.toggle('visible', show);
     };
 
     const loadDashboard = async () => {
@@ -429,7 +445,8 @@
 
         createdRoomsList.innerHTML = '';
         if (rooms) {
-            rooms.forEach(room => {
+            const myRooms = rooms.filter(room => room.user_id === user.id);
+            myRooms.forEach(room => {
                 const li = document.createElement('li');
                 li.dataset.roomId = room.id;
                 li.innerHTML = `
@@ -448,7 +465,7 @@
         currentRoom = room;
         dashboardView.classList.add('hidden');
         chatRoomView.classList.remove('hidden');
-        chatRoomView.style.display = 'flex'; // Override .hidden display property
+        chatRoomView.style.display = 'flex';
         document.getElementById('room-name-header').textContent = room.name;
         
         await loadMessages(room.id);
@@ -464,20 +481,20 @@
             .eq('room_id', roomId)
             .order('created_at', { ascending: true });
 
-        if (error) {
-            console.error('Error loading messages:', error);
-            return;
-        }
-
-        messages.forEach(displayMessage);
+        if (error) console.error('Error loading messages:', error);
+        else messages.forEach(displayMessage);
     };
 
     const displayMessage = (message) => {
         const chatMessages = document.getElementById('chat-messages');
         const messageElement = document.createElement('div');
         messageElement.classList.add('message');
+        if (message.user_id === user.id) {
+            messageElement.classList.add('is-own');
+        }
+
         messageElement.innerHTML = `
-            <div class="sender">Guest</div>
+            <div class="sender">${message.username || 'Guest'}</div>
             <div class="text">${message.content}</div>
         `;
         chatMessages.appendChild(messageElement);
@@ -486,16 +503,12 @@
 
     const setupMessageSubscription = (roomId) => {
         if (messageSubscription) {
-            supabase.removeChannel(messageSubscription);
+            messageSubscription.unsubscribe();
         }
 
-        messageSubscription = supabase.channel(`room:${roomId}`)
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'messages',
-                filter: `room_id=eq.${roomId}`
-            }, (payload) => {
+        messageSubscription = supabase.channel(`public:messages:room_id=eq.${roomId}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}`}, 
+            (payload) => {
                 displayMessage(payload.new);
             })
             .subscribe();
@@ -506,43 +519,79 @@
         if (content && currentRoom) {
             const { error } = await supabase
                 .from('messages')
-                .insert([{ room_id: currentRoom.id, content: content }]);
+                .insert([{ 
+                    room_id: currentRoom.id, 
+                    content: content,
+                    user_id: user.id,
+                    username: user.user_metadata.username
+                }]);
 
-            if (error) {
-                console.error('Error sending message:', error);
-                alert("Could not send message.");
-            } else {
-                messageInput.value = '';
-            }
+            if (error) console.error('Error sending message:', error);
+            else messageInput.value = '';
         }
     };
+    
+    // --- App Initialization ---
+    
+    async function initApp() {
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (data.session) {
+            user = data.session.user;
+        } else {
+             const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+             if (anonData.user) user = anonData.user;
+             else console.error("Could not sign in anonymously", anonError);
+        }
+
+        if (user && user.user_metadata.username) {
+            togglePopup(usernamePopup, false);
+            document.getElementById('username-display').textContent = `(as ${user.user_metadata.username})`;
+            loadDashboard();
+        } else {
+            togglePopup(usernamePopup, true);
+        }
+    }
 
     // --- Event Listeners ---
+    
+    usernameForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const usernameInput = document.getElementById('username').value.trim();
+        if (!usernameInput) return;
+        
+        const { data, error } = await supabase.auth.updateUser({
+            data: { username: usernameInput }
+        });
+
+        if (error) {
+            console.error("Error setting username:", error);
+            alert("Could not set username. Please try again.");
+        } else {
+            user = data.user;
+            togglePopup(usernamePopup, false);
+            document.getElementById('username-display').textContent = `(as ${user.user_metadata.username})`;
+            loadDashboard();
+        }
+    });
 
     createRoomBtn.addEventListener('click', () => togglePopup(createRoomPopup, true));
     joinRoomBtn.addEventListener('click', () => togglePopup(joinRoomPopup, true));
 
     backToDashboardBtn.addEventListener('click', () => {
         if (messageSubscription) {
-            supabase.removeChannel(messageSubscription);
+            messageSubscription.unsubscribe();
             messageSubscription = null;
         }
         currentRoom = null;
         chatRoomView.classList.add('hidden');
         dashboardView.classList.remove('hidden');
+        loadDashboard(); // Refresh the room list
     });
 
     closeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             togglePopup(btn.closest('.popup'), false);
-        });
-    });
-
-    popups.forEach(popup => {
-        popup.addEventListener('click', (e) => {
-            if (e.target === popup) {
-                togglePopup(popup, false);
-            }
         });
     });
 
@@ -554,13 +603,17 @@
 
         const { error } = await supabase
             .from('rooms')
-            .insert([{ name: roomName, password: password || null, invite_code: invCode }]);
+            .insert([{ 
+                name: roomName, 
+                password: password || null, 
+                invite_code: invCode,
+                user_id: user.id
+            }]);
 
         if (error) {
             console.error('Error creating room:', error);
-            alert('Error creating room. The invite code might already exist. Please try again.');
+            alert('Error creating room.');
         } else {
-            alert(`Room created! Invite code: ${invCode}`);
             togglePopup(createRoomPopup, false);
             createRoomForm.reset();
             loadDashboard();
@@ -578,15 +631,8 @@
             .eq('invite_code', invCode)
             .single();
 
-        if (error || !room) {
-            alert('Invalid invite code.');
-            return;
-        }
-
-        if (room.password && room.password !== password) {
-            alert('Incorrect password.');
-            return;
-        }
+        if (error || !room) return alert('Invalid invite code.');
+        if (room.password && room.password !== password) return alert('Incorrect password.');
 
         togglePopup(joinRoomPopup, false);
         joinRoomForm.reset();
@@ -597,21 +643,25 @@
         const target = e.target;
         
         if (target.classList.contains('delete-btn')) {
-            const roomId = target.dataset.id;
-            if (confirm('Are you sure you want to delete this room? All messages will be lost.')) {
+            const roomId = e.target.dataset.id;
+            if (confirm('Are you sure you want to delete this room?')) {
                 const { error } = await supabase.from('rooms').delete().eq('id', roomId);
-                if (error) console.error('Error deleting room:', error);
-                else loadDashboard();
+                if (error) {
+                    console.error('Error deleting room:', error);
+                    alert('Could not delete room. You might not be the owner.');
+                } else {
+                    loadDashboard();
+                }
             }
         } else if (target.classList.contains('rename-btn')) {
-            roomToRename = { id: target.dataset.id, name: target.dataset.name };
+            roomToRename = { id: e.target.dataset.id, name: e.target.dataset.name };
             document.getElementById('newRoomName').value = roomToRename.name;
             togglePopup(renameRoomPopup, true);
         } else {
             const li = target.closest('li');
             if (li) {
-                const roomId = li.dataset.roomId;
-                const { data: room, error } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+                const joinRoomId = li.dataset.roomId;
+                const { data: room, error } = await supabase.from('rooms').select('*').eq('id', joinRoomId).single();
                 if (room) enterChatRoom(room);
             }
         }
@@ -627,7 +677,7 @@
 
         if (error) {
             console.error('Error renaming room:', error);
-            alert('Failed to rename room.');
+            alert('Failed to rename room. You might not be the owner.');
         } else {
             togglePopup(renameRoomPopup, false);
             loadDashboard();
@@ -642,8 +692,8 @@
         }
     });
 
-    // --- Initial Load ---
-    loadDashboard();
+    // --- Start the App ---
+    initApp();
 
 </script>
 </body>
